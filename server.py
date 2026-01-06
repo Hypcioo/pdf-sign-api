@@ -1,6 +1,7 @@
 from flask import Flask, request, send_file
 from PyPDF2 import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
+from reportlab.lib.utils import ImageReader
 from PIL import Image
 import io
 
@@ -9,49 +10,49 @@ app = Flask(__name__)
 @app.route("/sign-pdf", methods=["POST"])
 def sign_pdf():
     try:
-        # Récupérer les fichiers
+        # Récupérer les fichiers envoyés
         pdf_file = request.files["pdf"]
         signature_file = request.files["signature"]
 
-        # Paramètres optionnels
-        page_number = int(request.form.get("page", 1)) - 1
-        x = float(request.form.get("x", 350))
-        y = float(request.form.get("y", 80))
-        scale = float(request.form.get("scale", 1.0))  # optionnel, pour réduire la signature
+        # Paramètres
+        page_number = int(request.form.get("page", 1)) - 1  # page à signer
+        x = float(request.form.get("x", 350))               # position x
+        y = float(request.form.get("y", 80))                # position y
+        scale = float(request.form.get("scale", 1.0))       # échelle de la signature
 
-        # Charger le PDF
+        # Lire le PDF
         reader = PdfReader(pdf_file)
         writer = PdfWriter()
 
-        # Convertir la signature en image et buffer pour reportlab
+        # Préparer l'image signature
         sig_bytes = signature_file.read()
         sig_buffer = io.BytesIO(sig_bytes)
-        signature_img = Image.open(sig_buffer).convert("RGBA")
-        sig_width, sig_height = signature_img.size
+        pil_img = Image.open(sig_buffer).convert("RGBA")
+        sig_width, sig_height = pil_img.size
         sig_width *= scale
         sig_height *= scale
 
+        img_reader = ImageReader(sig_buffer)  # conversion compatible ReportLab
+
+        # Parcourir les pages du PDF
         for i, page in enumerate(reader.pages):
-            # Copier la page dans le writer
             writer.add_page(page)
 
             # Si c'est la page à signer
             if i == page_number:
-                # Créer un buffer PDF pour la signature
                 packet = io.BytesIO()
                 page_width = float(page.mediabox.width)
                 page_height = float(page.mediabox.height)
 
                 c = canvas.Canvas(packet, pagesize=(page_width, page_height))
-                # drawImage accepte maintenant BytesIO
-                c.drawImage(sig_buffer, x, y, width=sig_width, height=sig_height, mask="auto")
+                c.drawImage(img_reader, x, y, width=sig_width, height=sig_height, mask="auto")
                 c.save()
                 packet.seek(0)
 
                 overlay_page = PdfReader(packet).pages[0]
                 page.merge_page(overlay_page)
 
-        # Sortie finale
+        # Préparer le PDF final
         output = io.BytesIO()
         writer.write(output)
         output.seek(0)
